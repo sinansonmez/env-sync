@@ -9,6 +9,16 @@ Status: ready (CLI flags and sync logic implemented).
 
 ## Install
 
+Homebrew:
+
+```bash
+brew tap sinansonmez/tools
+brew install env-sync
+env-sync -h
+```
+
+Go:
+
 ```bash
 go install ./...
 ```
