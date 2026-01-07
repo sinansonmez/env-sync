@@ -35,6 +35,13 @@ type ParseResult struct {
 	KeysInOrder []string
 }
 
+type MergeOptions struct {
+	KeepUnused        bool
+	UseSourceDefaults bool
+	FillEmpty         bool
+	UnusedKeys        []string
+}
+
 func main() {
 	var sourceEnvPath string
 	var destinationEnvPath string
@@ -55,7 +62,6 @@ func main() {
 	must(err)
 
 	source := ParseDotenv(sourceBytes)
-	fmt.Println(source)
 
 	destinationBytes, err := os.ReadFile(destinationEnvPath)
 	if err != nil {
@@ -67,7 +73,117 @@ func main() {
 	}
 
 	destination := ParseDotenv(destinationBytes)
-	fmt.Println(destination)
+
+	missingKeys := MissingKeys(source, destination)
+	unusedKeys := UnusedKeys(source, destination)
+
+	merged := Merge(source, destination, MergeOptions{
+		KeepUnused:        keepUnused,
+		UseSourceDefaults: useSourceDefaults,
+		FillEmpty:         fillEmpty,
+		UnusedKeys:        unusedKeys,
+	})
+
+	if dryRun {
+		fmt.Print(string(merged))
+		PrintReport(missingKeys, unusedKeys)
+		return
+	}
+
+	must(os.WriteFile(destinationEnvPath, merged, 0644))
+}
+
+func PrintReport(missing []string, unused []string) {
+	fmt.Println("")
+	fmt.Printf("missing keys (%d):\n", len(missing))
+	for _, k := range missing {
+		fmt.Printf("  - %s\n", k)
+	}
+	fmt.Printf("unused keys (%d):\n", len(unused))
+	for _, k := range unused {
+		fmt.Printf("  - %s\n", k)
+	}
+}
+
+func MissingKeys(source ParseResult, destination ParseResult) []string {
+	var missing []string
+	for _, key := range source.KeysInOrder {
+		if _, exists := destination.ByKey[key]; !exists {
+			missing = append(missing, key)
+		}
+	}
+	return missing
+}
+
+func UnusedKeys(source ParseResult, destination ParseResult) []string {
+	var unused []string
+	for _, key := range destination.KeysInOrder {
+		if _, exists := source.ByKey[key]; !exists {
+			unused = append(unused, key)
+		}
+	}
+	return unused
+}
+
+func Merge(source ParseResult, destination ParseResult, opts MergeOptions) []byte {
+	var b strings.Builder
+	lastLine := ""
+
+	writeLine := func(line string) {
+		b.WriteString(line)
+		b.WriteByte('\n')
+		lastLine = line
+	}
+
+	for _, pl := range source.Lines {
+		if pl.Kind != LineAssign {
+			writeLine(pl.Raw)
+			continue
+		}
+
+		value := ""
+		mergedLine := pl
+
+		if destIndex, exists := destination.ByKey[pl.Key]; exists {
+			destLine := destination.Lines[destIndex]
+			value = destLine.Value
+			if value == "" && opts.FillEmpty {
+				value = pl.Value
+			}
+			if mergedLine.Tail == "" && destLine.Tail != "" {
+				mergedLine.Tail = destLine.Tail
+			}
+		} else if opts.UseSourceDefaults {
+			value = pl.Value
+		}
+
+		mergedLine.Value = value
+		writeLine(RenderAssign(mergedLine))
+	}
+
+	unusedKeys := opts.UnusedKeys
+	if opts.KeepUnused && len(unusedKeys) == 0 {
+		unusedKeys = UnusedKeys(source, destination)
+	}
+	if opts.KeepUnused && len(unusedKeys) > 0 {
+		if strings.TrimSpace(lastLine) != "" {
+			writeLine("")
+		}
+		for _, key := range unusedKeys {
+			destIndex, exists := destination.ByKey[key]
+			if !exists {
+				continue
+			}
+			destLine := destination.Lines[destIndex]
+			if destLine.Kind == LineAssign {
+				writeLine(destLine.Raw)
+				continue
+			}
+			writeLine(destLine.Raw)
+		}
+	}
+
+	return []byte(b.String())
 }
 
 func must(err error) {

@@ -5,7 +5,7 @@ source template. The source file (like file from test or uat environment file) p
 destination file (like prod environment file) contributes existing values. Optional flags control whether to
 keep destination-only keys, fill missing or empty values, and dry-run output.
 
-Status: work in progress (CLI flags are wired; sync logic is pending).
+Status: ready (CLI flags and sync logic implemented).
 
 ## Install
 
